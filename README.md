@@ -1,36 +1,35 @@
-# Integra Book Price Calculator 📚
+## 🚀 Key Update Summary (v5.0 - Final Logic & Stability Patch)
 
-**Author:** XINYULI (KELLY)  
-**Version:** 3.0
+This submission represents a major engineering upgrade and business logic correction for the book price calculator, aiming for a more stable, aesthetically modern (Modern UI/UX), and functionally accurate pricing tool.
 
-A simple Python tool designed to calculate book prices (Member vs. Standard) based on real-time exchange rates.
+### 1. Architecture and Engineering Improvements (Stability & Best Practice)
 
-## ⚡ Features
+The underlying codebase has been thoroughly refactured to adhere to robust software engineering principles:
 
-* **Auto Exchange Rates:** Fetches real-time rates (Base: AUD).
-* **Quick Calculation:** Supports JPY, SGD, MYR, HKD, TWD, CNY, and AUD.
-* **Smart Pricing:** Automatically calculates:
-    * **Member Price:** Discounted rate.
-    * **Standard Price:** Adjusted market rate.
-* **Used Books:** One-click shortcuts for $5 / $10 used books.
+* **🛡️ Critical Stability Patching**:
+    * Introduced the **`RuntimeFixer`** module to specifically **address the `AttributeError` crashes in `CTkSwitch` and `CTkOptionMenu`** that occurred during widget destruction or initialization interruptions. This resolves random application failures under rapid operation or forced exit.
+    * Fixed a `KeyError: 'TEXT_SUB'` in the configuration to ensure the application's stability and correct color rendering across themes.
+* **🧩 MVC Architectural Separation**:
+    * **Logic Decoupling**: All complex pricing formulas are strictly contained within the **`PricingEngine`** static class. This complete separation from the UI layer significantly simplifies future maintenance and unit testing.
+    * **Configuration Centralization**: All variables (e.g., margins, API URLs, colors) are defined in the **`AppConfig`** class, enhancing maintainability.
+* **🌍 Thread Safety & Performance**: The `ExchangeRateService` utilizes `threading.Lock()` and asynchronous fetching to ensure data integrity and prevent the GUI from freezing .
 
-## 🚀 How to Run
+### 2. Modern UI/UX Implementation (Design & Experience)
 
-1.  **Install the library:**
-    ```bash
-    pip install requests
-    ```
+The application transitions from native Tkinter to CustomTkinter, adopting modern design standards:
 
-2.  **Run the script:**
-    ```bash
-    python main.py
-    ```
+* **Visual Consistency**: Utilizes **Dark Mode** with rounded, card-style layouts, providing a clean and professional aesthetic.
+* **Information Hierarchy**: The bottom **`DashboardView`** highlights the Member Price (large, primary color) while displaying the Standard Price in a muted, smaller font, prioritizing key user information.
+* **Interaction Refinement**: Buttons and input fields feature modern design touches and the status bar provides real-time feedback on synchronization status.
 
-## 🧮 Pricing Logic
+### 3. Finalized Business Logic (Accurate Pricing Model)
 
-* **Base Margin:** +15% on original price.
-* **Member Price:** Converted cost (minus 10% if "Recommended").
-* **Standard Price:** Benchmarked against CNY rates.
+The `PricingEngine` has been definitively updated to correctly execute the final, complex pricing policy agreed upon:
+
+| Pricing Scenario | Member Price Formula (Final AUD) | Standard (Non-Member) Price Formula (Final AUD) |
+| :--- | :--- | :--- |
+| **Standard Book** | `(Price + 15%)` $\rightarrow$ **AUD** | `(Price + 15%)` $\rightarrow$ **CNY $\times$ 0.3** $\rightarrow$ **AUD** |
+| **Manager Recommend** | **Base Member Price $\times$ 0.9** (Extra 10% off) | **Base Member Price** (Non-member gets member pricing) |
+| **Used Book** | Input Price $\rightarrow$ **AUD** | Input Price $\rightarrow$ **AUD** |
 
 ---
-*Created for personal use.*
