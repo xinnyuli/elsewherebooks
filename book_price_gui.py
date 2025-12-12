@@ -1,352 +1,289 @@
 # ============================================================
-#   Project: Integra Book Price Calculator Pro (Engineering Edition)
+#   Project: Book Price Calculator
 #   Author:  XINYULI (KELLY)
-#   Version: 3.0 (UI/UX Refactored)
+#   Version: 4.0 (UI/UX Refactored)
 #   Description: Professional FX pricing tool with OOP architecture
 # ============================================================
 
-import tkinter as tk
-from tkinter import ttk, messagebox
+import customtkinter as ctk
+import threading
 import requests
 import socket
-import threading
+import logging
+import signal
+import sys
 from datetime import datetime
+from typing import Dict, Tuple
 
-# ---- 配置常量 ----
-CONFIG = {
-    "SUPPORTED_CURRENCIES": ("JPY", "SGD", "MYR", "HKD", "TWD", "CNY", "AUD"),
-    "DEFAULT_MARGIN": 0.15,
-    "API_URL": "https://open.er-api.com/v6/latest/AUD",
-    "COLORS": {
-        "ACCENT": "#007AFF",       # 苹果蓝
-        "STANDARD": "#333333",     # 深黑
-        "BG": "#F2F2F7",           # 整体背景
-        "CARD_BG": "#FFFFFF",      # 卡片白
-        "TEXT_GRAY": "#86868B",
-        "SUCCESS": "#34C759",
-        "ERROR": "#FF3B30",
-        "TICKET_BG": "#E5E5EA"     # 结果区背景
+# ---- 1. 基础设施配置 ----
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(message)s', datefmt='%H:%M:%S')
+logger = logging.getLogger("Core")
+
+class AppConfig:
+    APP_NAME = "Pricing Calculator Pro"
+    GEOMETRY = "500x780"
+    THEME_MODE = "Dark"
+    
+    # 核心参数
+    MARGIN_RATE = 0.15          # +15% 基础溢价
+    CNY_COEFFICIENT = 0.3       # 非会员 CNY 换算系数
+    RECOMMEND_DISCOUNT = 0.9    # 推荐书籍：会员额外 9 折
+    
+    API_URL = "https://open.er-api.com/v6/latest/AUD"
+    CURRENCIES = ["JPY", "SGD", "MYR", "HKD", "TWD", "CNY", "AUD"]
+    
+    COLORS = {
+        "PRIMARY": "#0A84FF", 
+        "SECONDARY": ("#E5E5EA", "#2C2C2E"),
+        "TEXT_MAIN": ("#000000", "#FFFFFF"),
+        "TEXT_SUB": ("#8E8E93", "#98989D"), # 次要文字颜色
+        "WARN": "#FF9F0A",
+        "ERROR": "#FF453A"
     }
-}
+
+class RuntimeFixer:
+    """系统稳定性补丁"""
+    @staticmethod
+    def apply_patches():
+        def make_safe_destroy(cls_name):
+            def safe_destroy(self):
+                if hasattr(self, "_variable") and self._variable is not None:
+                    try:
+                        self._variable.trace_remove("write", self._trace_callback_name)
+                    except Exception: pass
+                super(cls_name, self).destroy()
+            return safe_destroy
+        ctk.CTkSwitch.destroy = make_safe_destroy(ctk.CTkSwitch)
+        ctk.CTkOptionMenu.destroy = make_safe_destroy(ctk.CTkOptionMenu)
+
+# ---- 2. 核心算法引擎 (重写) ----
+
+class PricingEngine:
+    @staticmethod
+    def calculate(price: float, currency: str, is_recommend: bool, is_used: bool, rates: Dict[str, float]) -> Tuple[float, float]:
+        """
+        :return: (Member Price, Standard Price)
+        """
+        if price <= 0: return 0.0, 0.0
+        
+        # [逻辑分支 A] 二手书
+        # 二手书通常是一口价，不涉及复杂换算，且没有会员折扣（根据行业惯例，或者你可以改为有折扣）
+        if is_used:
+            # 假设二手书输入的直接就是澳币卖价
+            return price, price
+
+        # [逻辑分支 B] 新书计算
+        
+        # 0. 汇率工具: X -> AUD
+        def get_rate_to_aud(code):
+            if code == "AUD": return 1.0
+            return 1.0 / rates.get(code, 1.0)
+
+        # 1. 计算【基础会员价】 (Base Member Price)
+        # 公式：(原价 + 15%) -> 转为 AUD
+        base_cost_native = price * (1 + AppConfig.MARGIN_RATE)
+        rate_native_to_aud = get_rate_to_aud(currency)
+        base_member_price_aud = base_cost_native * rate_native_to_aud
+
+        # 2. 计算【基础非会员价】 (Base Standard Price)
+        # 公式：(原价 + 15%) -> 转为 CNY -> 乘以 0.3
+        # 路径：Native -> AUD -> CNY
+        rate_aud_to_cny = rates.get("CNY", 1.0)
+        val_in_cny = base_member_price_aud * rate_aud_to_cny
+        base_standard_price_aud = val_in_cny * AppConfig.CNY_COEFFICIENT
+
+        # 3. 应用【店长推荐】逻辑
+        if is_recommend:
+            # 逻辑变更点：
+            # 非会员 -> 享受【基础会员价】
+            final_standard = base_member_price_aud
+            # 会员 -> 在【基础会员价】上再打 9 折
+            final_member = base_member_price_aud * AppConfig.RECOMMEND_DISCOUNT
+        else:
+            # 普通情况
+            final_standard = base_standard_price_aud
+            final_member = base_member_price_aud
+
+        return final_member, final_standard
+
+# ---- 3. 服务层 ----
 
 class ExchangeRateService:
-    """服务层：负责网络请求"""
     def __init__(self):
-        self.rates = {}
-        self.last_update = "未更新"
-        self.is_loading = False
+        self._rates = {}
+        self._last_update = "等待更新..."
+        self._lock = threading.Lock()
 
-    def check_internet(self, host="8.8.8.8", port=53, timeout=3):
-        try:
-            socket.setdefaulttimeout(timeout)
-            socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect((host, port))
-            return True
-        except Exception:
-            return False
+    @property
+    def rates(self):
+        with self._lock: return self._rates.copy()
+    
+    @property
+    def last_update(self):
+        with self._lock: return self._last_update
 
-    def fetch_rates(self, callback_success, callback_error):
-        if self.is_loading: return
-        self.is_loading = True
-        
+    def fetch_async(self, on_done, ctx):
         def task():
             try:
-                if not self.check_internet():
-                    raise ConnectionError("网络不可用")
-                
-                resp = requests.get(CONFIG["API_URL"], timeout=10)
-                resp.raise_for_status()
-                data = resp.json()
-                
-                if data.get("result") != "success":
-                    raise ValueError(f"API异常: {data}")
-
-                self.rates = data["rates"]
-                utc_time = data.get("time_last_update_utc", "")
-                self.last_update = utc_time[:19] if utc_time else datetime.now().strftime("%Y-%m-%d %H:%M")
-                callback_success()
+                socket.create_connection(("1.1.1.1", 53), timeout=3)
+                resp = requests.get(AppConfig.API_URL, timeout=10)
+                if resp.json().get("result") != "success": raise ValueError("API Error")
+                with self._lock:
+                    self._rates = resp.json()["rates"]
+                    self._last_update = datetime.now().strftime("%H:%M")
+                ctx.after(0, lambda: on_done(True, "同步成功"))
             except Exception as e:
-                callback_error(str(e))
-            finally:
-                self.is_loading = False
-
+                ctx.after(0, lambda: on_done(False, str(e)))
         threading.Thread(target=task, daemon=True).start()
 
-    def get_cross_rate(self, from_curr, to_curr):
-        if not self.rates: return 0.0
-        if from_curr == to_curr: return 1.0
-        rate_from_to_aud = 1.0 if from_curr == "AUD" else (1.0 / self.rates.get(from_curr, 1.0))
-        rate_aud_to_to = 1.0 if to_curr == "AUD" else self.rates.get(to_curr, 1.0)
-        return rate_from_to_aud * rate_aud_to_to
+# ---- 4. UI 组件 ----
 
-class BookRow(ttk.Frame):
-    """组件层：单行书籍UI"""
-    def __init__(self, parent, on_change_callback, on_delete_callback, default_price="", is_used=False):
-        super().__init__(parent)
-        self.on_change = on_change_callback
-        self.is_used = is_used
-        self.columnconfigure(2, weight=1) 
-        
-        self.var_currency = tk.StringVar(value="AUD" if is_used else "JPY")
-        self.cb_currency = ttk.Combobox(
-            self, textvariable=self.var_currency, 
-            values=CONFIG["SUPPORTED_CURRENCIES"], 
-            width=5, state="readonly"
+class BookCardView(ctk.CTkFrame):
+    def __init__(self, parent, on_change, on_delete, default_price="", is_used=False):
+        super().__init__(parent, fg_color=AppConfig.COLORS["SECONDARY"], corner_radius=8)
+        self.on_change = on_change
+        self._is_used = is_used
+        self.grid_columnconfigure(1, weight=1)
+
+        # 货币
+        self.curr_var = ctk.StringVar(value="AUD" if is_used else "JPY")
+        self.curr_menu = ctk.CTkOptionMenu(
+            self, variable=self.curr_var, values=AppConfig.CURRENCIES,
+            width=75, height=28, fg_color=AppConfig.COLORS["SECONDARY"], # 实体颜色防崩
+            button_color=("gray70", "gray30"), text_color=AppConfig.COLORS["TEXT_MAIN"],
+            command=self._notify
         )
-        self.cb_currency.pack(side="left", padx=(0, 5))
-        self.cb_currency.bind("<<ComboboxSelected>>", self._trigger_change)
+        self.curr_menu.grid(row=0, column=0, padx=(10, 5), pady=10)
 
-        self.var_price = tk.StringVar(value=str(default_price))
-        self.var_price.trace_add("write", self._trigger_change)
-        vcmd = (self.register(self._validate_number), '%P')
-        self.entry_price = ttk.Entry(
-            self, textvariable=self.var_price, width=10, 
-            validate="key", validatecommand=vcmd,
-            state="readonly" if is_used else "normal"
-        )
-        self.entry_price.pack(side="left", padx=5)
+        # 价格
+        self.price_var = ctk.StringVar(value=str(default_price))
+        self.price_var.trace_add("write", self._notify)
+        ctk.CTkEntry(
+            self, textvariable=self.price_var, width=100, height=28,
+            placeholder_text="0.00", border_width=0, fg_color=("white", "gray20")
+        ).grid(row=0, column=1, padx=5, sticky="ew")
 
+        # 推荐/二手
+        self.rec_var = ctk.BooleanVar(value=False)
         if is_used:
-            ttk.Label(self, text="[二手]", foreground=CONFIG["COLORS"]["TEXT_GRAY"]).pack(side="left", padx=5)
-            self.var_recommend = tk.BooleanVar(value=False)
+            ctk.CTkLabel(self, text="USED", text_color=AppConfig.COLORS["WARN"], font=("Arial", 11, "bold")).grid(row=0, column=2, padx=10)
         else:
-            self.var_recommend = tk.BooleanVar(value=False)
-            self.chk_recommend = ttk.Checkbutton(
-                self, text="推荐", variable=self.var_recommend, 
-                command=self._trigger_change
-            )
-            self.chk_recommend.pack(side="left", padx=5)
+            ctk.CTkSwitch(
+                self, text="Rec", variable=self.rec_var, command=self._notify,
+                width=60, height=20, font=("Arial", 11), progress_color=AppConfig.COLORS["PRIMARY"]
+            ).grid(row=0, column=2, padx=10)
 
-        self.btn_del = ttk.Button(self, text="×", width=3, command=lambda: on_delete_callback(self))
-        self.btn_del.pack(side="right", padx=5)
+        # 删除
+        ctk.CTkButton(
+            self, text="×", width=30, height=28, fg_color="transparent", 
+            hover_color=("gray80", "gray25"), text_color="gray50", font=("Arial", 18),
+            command=lambda: on_delete(self)
+        ).grid(row=0, column=3, padx=(0, 5))
 
-    def _validate_number(self, new_value):
-        if new_value == "": return True
-        try:
-            float(new_value)
-            return True
-        except ValueError:
-            return False
-
-    def _trigger_change(self, *args):
-        self.on_change()
-
+    def _notify(self, *args): self.on_change()
     def get_data(self):
-        try: price = float(self.var_price.get())
-        except ValueError: price = 0.0
-        return {
-            "currency": self.var_currency.get(),
-            "price": price,
-            "is_recommend": self.var_recommend.get(),
-            "is_used": self.is_used
-        }
+        try: p = float(self.price_var.get())
+        except: p = 0.0
+        return { "price": p, "currency": self.curr_var.get(), "is_recommend": self.rec_var.get(), "is_used": self._is_used }
 
-class BookPriceApp(tk.Tk):
-    """主程序控制器"""
+class DashboardView(ctk.CTkFrame):
+    def __init__(self, parent):
+        super().__init__(parent, fg_color=AppConfig.COLORS["SECONDARY"], corner_radius=12, height=100)
+        self.pack_propagate(False)
+        self.grid_columnconfigure((0, 1), weight=1)
+        
+        self._make_box(0, "MEMBER PRICE", 28, AppConfig.COLORS["PRIMARY"], "lbl_mem")
+        self._make_box(1, "STANDARD", 20, AppConfig.COLORS["TEXT_SUB"], "lbl_std")
+
+    def _make_box(self, col, title, size, color, attr):
+        f = ctk.CTkFrame(self, fg_color="transparent")
+        f.grid(row=0, column=col, padx=20, sticky="w" if col==0 else "e")
+        ctk.CTkLabel(f, text=title, font=("Arial", 10, "bold"), text_color="gray50").pack(anchor="w" if col==0 else "e")
+        lbl = ctk.CTkLabel(f, text="$0.00", font=("Arial", size, "bold"), text_color=color)
+        lbl.pack(anchor="w" if col==0 else "e")
+        setattr(self, attr, lbl)
+
+    def update(self, mem, std):
+        self.lbl_mem.configure(text=f"${mem:,.2f}")
+        self.lbl_std.configure(text=f"${std:,.2f}")
+
+# ---- 5. 主程序 ----
+
+class Application(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("📚 书价计算器 Pro | Dev: XINYULI(KELLY)")
-        self.geometry("500x600") 
-        self.configure(bg=CONFIG["COLORS"]["BG"])
-        
+        self.title(AppConfig.APP_NAME)
+        self.geometry(AppConfig.GEOMETRY)
+        ctk.set_appearance_mode(AppConfig.THEME_MODE)
         self.service = ExchangeRateService()
         self.rows = []
+        self._setup_ui()
+        self.after(500, self.refresh_data)
 
-        self._setup_styles()
-        self._build_ui()
-        
-        # 启动逻辑
-        self.after(500, self.refresh_rates_action)
-        self._update_ui_state()
+    def _setup_ui(self):
+        # Header
+        h = ctk.CTkFrame(self, fg_color="transparent")
+        h.pack(fill="x", padx=20, pady=20)
+        ctk.CTkLabel(h, text="Pricing Calc", font=("Arial", 24, "bold")).pack(side="left")
+        self.status = ctk.CTkLabel(h, text="Ready", text_color="gray50")
+        self.status.pack(side="right", padx=10)
+        self.btn_ref = ctk.CTkButton(h, text="↻", width=30, fg_color="transparent", border_width=1, text_color="gray", command=self.refresh_data)
+        self.btn_ref.pack(side="right")
 
-    def _setup_styles(self):
-        style = ttk.Style()
-        style.theme_use('clam')
-        
-        # 基础样式
-        style.configure("TFrame", background=CONFIG["COLORS"]["BG"])
-        style.configure("TLabel", background=CONFIG["COLORS"]["BG"], foreground="#333", font=("Microsoft YaHei", 10))
-        
-        # 结果区样式 (Ticket Style)
-        style.configure("Ticket.TFrame", background=CONFIG["COLORS"]["TICKET_BG"], relief="flat")
-        style.configure("Ticket.TLabel", background=CONFIG["COLORS"]["TICKET_BG"], font=("Consolas", 9), foreground="#555")
-        
-        # 价格大数字
-        style.configure("PriceMem.TLabel", font=("Microsoft YaHei", 22, "bold"), background=CONFIG["COLORS"]["TICKET_BG"], foreground=CONFIG["COLORS"]["ACCENT"])
-        style.configure("PriceStd.TLabel", font=("Microsoft YaHei", 18, "bold"), background=CONFIG["COLORS"]["TICKET_BG"], foreground=CONFIG["COLORS"]["STANDARD"])
-        style.configure("LabelMem.TLabel", font=("Microsoft YaHei", 9), background=CONFIG["COLORS"]["TICKET_BG"], foreground=CONFIG["COLORS"]["ACCENT"])
-        style.configure("LabelStd.TLabel", font=("Microsoft YaHei", 9), background=CONFIG["COLORS"]["TICKET_BG"], foreground="#666")
+        # Scroll
+        self.scroll = ctk.CTkScrollableFrame(self, fg_color="transparent", label_text="ITEMS", label_font=("Arial", 12, "bold"))
+        self.scroll.pack(fill="both", expand=True, padx=15)
+        self.empty = ctk.CTkLabel(self.scroll, text="No books added", text_color="gray40")
+        self.empty.pack(pady=40)
 
-        # 空状态
-        style.configure("Empty.TLabel", font=("Microsoft YaHei", 11), foreground=CONFIG["COLORS"]["TEXT_GRAY"])
+        # Footer
+        f = ctk.CTkFrame(self, fg_color="transparent")
+        f.pack(fill="x", padx=15, pady=15)
+        b = ctk.CTkFrame(f, fg_color="transparent")
+        b.pack(fill="x", pady=(0, 15))
+        ctk.CTkButton(b, text="+ New Book", height=40, fg_color=AppConfig.COLORS["PRIMARY"], font=("Arial", 14, "bold"), command=self.add_new).pack(side="left", expand=True, fill="x", padx=(0,5))
+        ctk.CTkButton(b, text="+ Used $5", height=40, width=80, fg_color="transparent", border_width=1, text_color=AppConfig.COLORS["TEXT_MAIN"], command=lambda: self.add_used(5)).pack(side="left")
+        self.dash = DashboardView(f)
+        self.dash.pack(fill="x")
 
-    def _build_ui(self):
-        # 1. 顶部操作栏
-        top_bar = ttk.Frame(self, padding=(10, 10, 10, 5))
-        top_bar.pack(fill="x", side="top")
-        
-        btn_frame = ttk.Frame(top_bar)
-        btn_frame.pack(side="left")
-        ttk.Button(btn_frame, text="+ 新书", command=self.add_row_action).pack(side="left", padx=(0,5))
-        ttk.Button(btn_frame, text="+ 二手 $5", command=lambda: self.add_used_book(5)).pack(side="left", padx=5)
-        ttk.Button(btn_frame, text="+ 二手 $10", command=lambda: self.add_used_book(10)).pack(side="left", padx=5)
+    def refresh_data(self):
+        self.status.configure(text="Updating...", text_color=AppConfig.COLORS["WARN"])
+        self.btn_ref.configure(state="disabled")
+        self.service.fetch_async(self._on_done, self)
 
-        self.btn_refresh = ttk.Button(top_bar, text="🔄", width=3, command=self.refresh_rates_action)
-        self.btn_refresh.pack(side="right")
+    def _on_done(self, ok, msg):
+        self.btn_ref.configure(state="normal")
+        self.status.configure(text=msg if not ok else f"Updated {self.service.last_update}", text_color=AppConfig.COLORS["TEXT_SUB"] if ok else "red")
+        self.recalc()
 
-        # 2. 状态栏
-        self.status_bar = ttk.Label(self, text="系统初始化...", font=("Microsoft YaHei", 8), foreground="#999", padding=(10, 0, 10, 5))
-        self.status_bar.pack(fill="x", side="top")
+    def add_new(self): self._add_row()
+    def add_used(self, p): self._add_row(str(p), True)
 
-        # 3. 结果展示区 (Ticket Area) - 放在底部
-        self.result_container = ttk.Frame(self, style="Ticket.TFrame", padding=15)
-        self.result_container.pack(fill="x", side="bottom")
+    def _add_row(self, p="", used=False):
+        if not self.rows: self.empty.pack_forget()
+        r = BookCardView(self.scroll, self.recalc, self._del_row, p, used)
+        r.pack(fill="x", pady=4)
+        self.rows.append(r)
+        self.recalc()
 
-        # 3.1 明细 (Details)
-        self.lbl_details = ttk.Label(self.result_container, text="", style="Ticket.TLabel", justify="left")
-        self.lbl_details.pack(fill="x", pady=(0, 10))
-        
-        # 3.2 总价对比 (Dashboard)
-        self.total_frame = ttk.Frame(self.result_container, style="Ticket.TFrame")
-        self.total_frame.pack(fill="x")
-        self.total_frame.columnconfigure(0, weight=1)
-        self.total_frame.columnconfigure(1, weight=1)
+    def _del_row(self, r):
+        r.destroy()
+        if r in self.rows: self.rows.remove(r)
+        if not self.rows: self.empty.pack(pady=40)
+        self.recalc()
 
-        # 左侧：会员
-        f_left = ttk.Frame(self.total_frame, style="Ticket.TFrame")
-        f_left.grid(row=0, column=0, sticky="w")
-        ttk.Label(f_left, text="会员总价", style="LabelMem.TLabel").pack(anchor="w")
-        self.lbl_total_member = ttk.Label(f_left, text="$0.00", style="PriceMem.TLabel")
-        self.lbl_total_member.pack(anchor="w")
-
-        # 右侧：标准
-        f_right = ttk.Frame(self.total_frame, style="Ticket.TFrame")
-        f_right.grid(row=0, column=1, sticky="e")
-        ttk.Label(f_right, text="非会员 / 标准价", style="LabelStd.TLabel").pack(anchor="e")
-        self.lbl_total_non_member = ttk.Label(f_right, text="$0.00", style="PriceStd.TLabel")
-        self.lbl_total_non_member.pack(anchor="e")
-
-        # 4. 列表滚动区
-        list_container = ttk.Frame(self, padding=10)
-        list_container.pack(fill="both", expand=True)
-        
-        self.canvas = tk.Canvas(list_container, bg=CONFIG["COLORS"]["BG"], highlightthickness=0)
-        scrollbar = ttk.Scrollbar(list_container, orient="vertical", command=self.canvas.yview)
-        
-        self.scrollable_frame = ttk.Frame(self.canvas, style="TFrame")
-        self.scrollable_frame.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
-        self.canvas_window = self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
-        
-        self.canvas.bind("<Configure>", lambda e: self.canvas.itemconfig(self.canvas_window, width=e.width))
-        self.canvas.configure(yscrollcommand=scrollbar.set)
-        
-        self.canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-
-        # 空状态文字
-        self.lbl_empty = ttk.Label(
-            self.scrollable_frame, 
-            text="尚未添加书籍...", 
-            style="Empty.TLabel"
-        )
-
-    # ---- 交互逻辑 ----
-    def _update_ui_state(self):
-        """控制空状态和结果区的显示"""
-        if not self.rows:
-            self.lbl_empty.pack(pady=50, padx=10)
-            self.result_container.pack_forget()
-        else:
-            self.lbl_empty.pack_forget()
-            self.result_container.pack(fill="x", side="bottom")
-
-    def refresh_rates_action(self):
-        self.btn_refresh.configure(state="disabled")
-        self.status_bar.configure(text="正在更新汇率...", foreground="#FF9500")
-        self.service.fetch_rates(self._on_rate_success, self._on_rate_error)
-
-    def _on_rate_success(self):
-        self.btn_refresh.configure(state="normal")
-        self.status_bar.configure(text=f"汇率已更新 ({self.service.last_update})", foreground=CONFIG["COLORS"]["SUCCESS"])
-        self.calculate_all()
-
-    def _on_rate_error(self, error_msg):
-        self.btn_refresh.configure(state="normal")
-        self.status_bar.configure(text=f"离线模式 - {error_msg}", foreground=CONFIG["COLORS"]["ERROR"])
-
-    def add_row_action(self):
-        row = BookRow(self.scrollable_frame, self.calculate_all, self.remove_row_action)
-        row.pack(fill="x", pady=2)
-        self.rows.append(row)
-        self._update_ui_state()
-        self.calculate_all()
-
-    def add_used_book(self, price):
-        row = BookRow(self.scrollable_frame, self.calculate_all, self.remove_row_action, default_price=price, is_used=True)
-        row.pack(fill="x", pady=2)
-        self.rows.append(row)
-        self._update_ui_state()
-        self.calculate_all()
-
-    def remove_row_action(self, row_instance):
-        row_instance.destroy()
-        if row_instance in self.rows:
-            self.rows.remove(row_instance)
-        self._update_ui_state()
-        self.calculate_all()
-
-    def calculate_all(self):
-        if not self.service.rates:
-            self.status_bar.configure(text="等待汇率数据...", foreground=CONFIG["COLORS"]["ERROR"])
-            return
-
-        total_member = 0.0
-        total_non_member = 0.0
-        details_text = []
-        has_valid_data = False
-
-        for row in self.rows:
-            data = row.get_data()
-            price = data["price"]
-            currency = data["currency"]
-            
-            if price <= 0: continue
-            has_valid_data = True
-
-            # --- 核心计算逻辑 ---
-            if currency == "AUD":
-                std_mem = price
-                std_non = price
-            else:
-                base = price * (1 + CONFIG["DEFAULT_MARGIN"])
-                std_mem = base * self.service.get_cross_rate(currency, "AUD")
-                std_non = base * self.service.get_cross_rate(currency, "CNY") * 0.3
-
-            if data["is_recommend"]:
-                fin_mem = std_mem * 0.9
-                fin_non = std_mem
-                tag = " [荐]" 
-            else:
-                fin_mem = std_mem
-                fin_non = std_non
-                tag = ""
-            # ------------------
-            
-            details_text.append(f"{currency} {price:>6g} ➜ 会${fin_mem:>6.2f}{tag}")
-            total_member += fin_mem
-            total_non_member += fin_non
-
-        if has_valid_data:
-            self.lbl_details.configure(text="\n".join(details_text))
-            self.lbl_total_member.configure(text=f"${total_member:.2f}")
-            self.lbl_total_non_member.configure(text=f"${total_non_member:.2f}")
-            # 确保结果区可见
-            self.result_container.pack(fill="x", side="bottom")
-            self.lbl_details.pack(fill="x", pady=(0, 10))
-        else:
-            self.lbl_details.pack_forget() 
-            self.lbl_total_member.configure(text="$0.00")
-            self.lbl_total_non_member.configure(text="$0.00")
+    def recalc(self):
+        t_mem, t_std = 0.0, 0.0
+        rates = self.service.rates
+        for r in self.rows:
+            d = r.get_data()
+            m, s = PricingEngine.calculate(d["price"], d["currency"], d["is_recommend"], d["is_used"], rates)
+            t_mem += m
+            t_std += s
+        self.dash.update(t_mem, t_std)
 
 if __name__ == "__main__":
-    app = BookPriceApp()
-    app.mainloop()
+    RuntimeFixer.apply_patches()
+    signal.signal(signal.SIGINT, lambda s, f: sys.exit(0))
+    Application().mainloop()
