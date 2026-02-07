@@ -40,7 +40,7 @@ class VintageConfig:
     
     API_URL = "https://open.er-api.com/v6/latest/AUD"
     CURRENCIES = ["JPY", "SGD", "MYR", "HKD", "TWD", "CNY", "AUD"]
-    CATEGORIES = ["漫画", "日本文学", "诗歌", "艺术", "纪实文学", "心灵疗愈", "文化研究", "散文", "摄影", "音乐", "黑胶", "福袋盲盒", "哲学", "历史", "政治", "东南亚文学", "台湾文学", "女性主义", "科普", "社科", "文艺批评", "中国研究", "传记", "建筑", "其他"]
+    CATEGORIES = ["小说","漫画", "日本文学", "诗歌", "艺术", "纪实文学", "心灵疗愈", "文化研究", "散文", "摄影", "音乐", "黑胶", "福袋盲盒", "哲学", "历史", "政治", "东南亚文学", "台湾文学", "女性主义", "科普", "社科", "文艺批评", "中国研究", "传记", "建筑", "其他"]
     
     DATA_DIR = Path.home() / ".bookstore_data"
     SALES_FILE = DATA_DIR / "sales_records.json"
