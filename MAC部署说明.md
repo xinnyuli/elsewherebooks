@@ -1,49 +1,65 @@
 # 📚 书店记账本 - Mac部署指南
 
-## 方法一：直接运行（最简单）⭐
+## ⚠️ 重要：Mac 必须使用 pythonw3
 
-### 1. 安装Python环境
+**如果程序闪退并显示 `English.lproj` 或 `Info.plist`，说明你用了 `python3` 启动！**
+
+### ✅ 正确启动方式：
 ```bash
-# 检查Python版本（需要3.10+）
-python3 --version
+pythonw3 book_price_gui.py  # ✓ 正确
+```
 
-# 如果没有安装，使用Homebrew安装
-brew install python@3.10
+### ❌ 错误启动方式：
+```bash
+python3 book_price_gui.py   # ✗ 会闪退！
+```
+
+**原因：** macOS 的 GUI 程序需要 `pythonw3` 来正确加载 Tk 图形框架。
+
+---
+
+## 方法一：快速启动（推荐）⭐
+
+### 1. 安装 Python（使用官方版本）
+```bash
+# 检查 pythonw3 是否存在
+which pythonw3
+
+# 如果不存在，必须从 Python.org 下载官方安装包
+# 🔗 https://www.python.org/downloads/macos/
+# Homebrew 的 Python 通常缺少 pythonw3！
 ```
 
 ### 2. 安装依赖包
 ```bash
-pip3 install customtkinter requests pypinyin
+pip3 install customtkinter requests pypinyin pandas openpyxl
 ```
 
-### 3. 运行程序
+### 3. 运行程序（使用 pythonw3）
 ```bash
-cd /path/to/MyBookCalculator
-python3 book_price_gui.py
+cd /path/to/elsewherebooks
+pythonw3 book_price_gui.py
 ```
 
 完成！程序会直接启动。
 
 ---
 
-## 方法二：创建桌面快捷启动
+## 方法二：一键启动脚本（最方便）
 
-### 1. 创建启动脚本
-在项目目录创建 `启动书店记账本.command` 文件：
+项目已包含 `启动书店记账本_Mac.command` 脚本，双击即可运行。
 
+**如果无法双击启动，手动添加执行权限：**
 ```bash
-#!/bin/bash
-cd "$(dirname "$0")"
-python3 book_price_gui.py
+cd /path/to/elsewherebooks
+chmod +x 启动书店记账本_Mac.command
 ```
 
-### 2. 添加执行权限
-```bash
-chmod +x 启动书店记账本.command
-```
-
-### 3. 双击运行
-现在可以双击 `启动书店记账本.command` 启动程序
+该脚本会自动：
+- ✓ 检测 pythonw3 可用性（优先使用）
+- ✓ 检查并安装缺失依赖
+- ✓ 使用正确方式启动程序
+- ✓ 自动关闭终端窗口
 
 ---
 

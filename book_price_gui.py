@@ -1944,6 +1944,6 @@ class VintageBookstoreApp(ctk.CTk):
         VintageButton(dialog, text="确认", width=150, command=do_switch).pack()
 
 if __name__ == "__main__":
-    RuntimeFixer.apply_patches()
+    # RuntimeFixer.apply_patches()
     app = VintageBookstoreApp()
     app.mainloop()
