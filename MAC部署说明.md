@@ -80,10 +80,106 @@ pyinstaller --name="书店记账本" \
 
 ---
 
+## � 故障诊断（程序闪退/无法启动）
+
+如果程序启动后立即闪退，请按照以下步骤逐一排查：
+
+### 步骤 1：检查 Python 版本
+```bash
+python3 --version
+```
+**要求：** Python 3.10 或更高版本  
+**如果版本过低：** `brew install python@3.10`
+
+### 步骤 2：检查 Tkinter 支持
+```bash
+python3 -c "import tkinter; print('✓ Tkinter OK')"
+```
+**如果报错：** 说明 Python 缺少 Tkinter 支持  
+**解决方法：**
+```bash
+# 使用 Homebrew 重装带 Tkinter 的 Python
+brew install python-tk@3.10
+```
+
+### 步骤 3：安装所有依赖
+```bash
+pip3 install customtkinter requests pypinyin pandas openpyxl
+```
+
+### 步骤 4：查看详细错误信息
+```bash
+cd /path/to/MyBookCalculator
+python3 book_price_gui.py 2>&1 | head -30
+```
+**这会显示前 30 行错误信息，可以帮助定位具体问题**
+
+### 常见错误及解决方案
+
+#### ❌ ModuleNotFoundError: No module named 'customtkinter'
+**原因：** 缺少依赖包  
+**解决：** `pip3 install customtkinter`
+
+#### ❌ ImportError: dlopen(): Library not loaded
+**原因：** Tkinter 库损坏或缺失  
+**解决：** 
+```bash
+brew reinstall python-tk@3.10
+```
+
+#### ❌ ValueError: unknown locale: UTF-8
+**原因：** Mac 语言环境设置问题  
+**解决：** 在 `~/.bash_profile` 或 `~/.zshrc` 添加：
+```bash
+export LC_ALL=en_US.UTF-8
+export LANG=en_US.UTF-8
+```
+然后运行 `source ~/.zshrc` 或重启终端
+
+#### ❌ 程序启动但无窗口显示
+**原因：** 可能是信号处理问题（已在最新版本修复）  
+**解决：** 更新到最新版本的 `book_price_gui.py`
+
+### 完整诊断命令（一键排查）
+```bash
+#!/bin/bash
+echo "=== Python 版本 ==="
+python3 --version
+
+echo -e "\n=== Tkinter 检查 ==="
+python3 -c "import tkinter; print('✓ Tkinter 正常')" 2>&1
+
+echo -e "\n=== 依赖检查 ==="
+python3 -c "
+try:
+    import customtkinter
+    print('✓ customtkinter 已安装')
+except:
+    print('✗ customtkinter 未安装')
+
+try:
+    import requests
+    print('✓ requests 已安装')
+except:
+    print('✗ requests 未安装')
+"
+
+echo -e "\n=== 尝试启动程序 ==="
+python3 book_price_gui.py 2>&1 | head -20
+```
+
+**将以上内容保存为 `诊断.sh`，添加执行权限后运行：**
+```bash
+chmod +x 诊断.sh
+./诊断.sh
+```
+
+---
+
 ## 🔧 常见问题
 
 ### Q: 提示找不到customtkinter？
-A: 运行 `pip3 install customtkinter requests pypinyin`
+A: 运行 `pip3 install customtkinter requests pypinyin pandas openpyxl`
 
 ### Q: 双击.py文件没反应？
 A: 使用终端执行 `python3 book_price_gui.py`
