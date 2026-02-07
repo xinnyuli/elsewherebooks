@@ -144,15 +144,19 @@ class DataService:
         if not VintageConfig.MANAGERS_FILE.exists():
             VintageConfig.MANAGERS_FILE.write_text('["Kelly"]')
     
-    def save_sale(self, books: List[Dict], total_member: float, total_standard: float):
+    def save_sale(self, books: List[Dict], total_member: float, total_standard: float, sale_type: str = "member", actual_revenue: float = None):
         try:
             records = json.loads(VintageConfig.SALES_FILE.read_text())
+            if actual_revenue is None:
+                actual_revenue = total_member
             record = {
                 "id": datetime.now().strftime("%Y%m%d_%H%M%S"),
                 "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "books": books,
+                "sale_type": sale_type,
                 "total_member_price": round(total_member, 2),
-                "total_standard_price": round(total_standard, 2)
+                "total_standard_price": round(total_standard, 2),
+                "actual_revenue": round(actual_revenue, 2)
             }
             records.append(record)
             VintageConfig.SALES_FILE.write_text(json.dumps(records, ensure_ascii=False, indent=2))
@@ -391,7 +395,11 @@ class BookCard(ctk.CTkFrame):
         
         # 价格
         self.price_var = ctk.StringVar(value=str(default_price))
-        self.price_var.trace_add("write", self._notify)
+        self.price_var.trace_add("write", self._on_price_change)
+        
+        # 注册验证函数：只允许数字和小数点
+        vcmd = (self.register(self._validate_price), '%P')
+        
         self.price_entry = ctk.CTkEntry(
             price_frame,
             textvariable=self.price_var,
@@ -401,7 +409,9 @@ class BookCard(ctk.CTkFrame):
             font=VintageConfig.FONTS["NUMBER"],
             fg_color=VintageConfig.COLORS["BG_MAIN"],
             border_color=VintageConfig.COLORS["BORDER"],
-            state="disabled"
+            state="disabled",
+            validate="key",
+            validatecommand=vcmd
         )
         self.price_entry.pack(side="left", padx=(0, 10))
         
@@ -543,6 +553,19 @@ class BookCard(ctk.CTkFrame):
         
         self._notify()
     
+    def _validate_price(self, value):
+        """验证价格输入：只允许数字和小数点"""
+        if value == "":
+            return True
+        # 允许：纯数字、一个小数点、小数点开头的数字
+        if re.match(r'^\d*\.?\d*$', value):
+            return True
+        return False
+    
+    def _on_price_change(self, *args):
+        """价格变化时的回调"""
+        self._notify()
+    
     def _notify(self, *args):
         self.on_change()
     
@@ -566,6 +589,18 @@ class BookCard(ctk.CTkFrame):
         if not data["manager"]: return False, "请选择店长"
         if data["price"] <= 0: return False, "请输入有效价格"
         return True, ""
+    
+    def destroy(self):
+        # 清理trace回调，防止widget销毁后的回调错误
+        try:
+            self.title_var.trace_remove("write", self.title_var.trace_info()[0][1])
+        except:
+            pass
+        try:
+            self.price_var.trace_remove("write", self.price_var.trace_info()[0][1])
+        except:
+            pass
+        super().destroy()
 
 class PriceDisplay(ctk.CTkFrame):
     """价格显示板 - 复古风格"""
@@ -743,10 +778,29 @@ class SalesHistoryWindow(ctk.CTkToplevel):
         
         VintageLabel(header_content, "📜 销售记录", style="heading").pack(side="left")
         
-        # 搜索框
+        # 搜索和筛选栏
         search_frame = ctk.CTkFrame(header_content, fg_color="transparent")
         search_frame.pack(side="right")
         
+        # 购买类型筛选
+        self.filter_var = ctk.StringVar(value="all")
+        self.filter_var.trace_add("write", self._on_filter_change)
+        
+        filter_menu = ctk.CTkOptionMenu(
+            search_frame,
+            variable=self.filter_var,
+            values=["全部", "会员购买", "非会员购买"],
+            width=120,
+            height=35,
+            font=VintageConfig.FONTS["BODY"],
+            fg_color=VintageConfig.COLORS["PRIMARY"],
+            button_color=VintageConfig.COLORS["PRIMARY_LIGHT"],
+            button_hover_color=VintageConfig.COLORS["PRIMARY_HOVER"],
+            dropdown_fg_color=VintageConfig.COLORS["BG_CARD"]
+        )
+        filter_menu.pack(side="left", padx=5)
+        
+        # 搜索框
         self.search_var = ctk.StringVar()
         self.search_var.trace_add("write", self._on_search)
         
@@ -822,9 +876,20 @@ class SalesHistoryWindow(ctk.CTkToplevel):
         content = ctk.CTkFrame(card, fg_color="transparent")
         content.pack(fill="both", expand=True, padx=15, pady=12)
         
-        # 头部 - 时间
-        VintageLabel(content, record["timestamp"], style="body_bold",
-                    text_color=VintageConfig.COLORS["PRIMARY"]).pack(anchor="w", pady=(0, 8))
+        # 头部 - 时间 + 购买类型
+        header_row = ctk.CTkFrame(content, fg_color="transparent")
+        header_row.pack(fill="x", pady=(0, 8))
+        
+        VintageLabel(header_row, record["timestamp"], style="body_bold",
+                    text_color=VintageConfig.COLORS["PRIMARY"]).pack(side="left")
+        
+        # 购买类型标签
+        sale_type = record.get("sale_type", "member")
+        type_label = "🎫 会员" if sale_type == "member" else "👥 非会员"
+        type_color = VintageConfig.COLORS["ACCENT"] if sale_type == "member" else VintageConfig.COLORS["TEXT_SUB"]
+        
+        VintageLabel(header_row, type_label, style="small",
+                    text_color=type_color).pack(side="right")
         
         # 书籍列表
         for book in record["books"]:
@@ -856,9 +921,17 @@ class SalesHistoryWindow(ctk.CTkToplevel):
         footer = ctk.CTkFrame(content, fg_color="transparent")
         footer.pack(fill="x")
         
-        VintageLabel(footer, f"会员总价: ${record['total_member_price']:.2f}",
+        # 显示实际收入
+        actual_revenue = record.get("actual_revenue", record["total_member_price"])
+        VintageLabel(footer, f"实际收入: ${actual_revenue:.2f}",
                     style="body_bold",
                     text_color=VintageConfig.COLORS["ACCENT"]).pack(side="left")
+        
+        # 右侧显示会员/标准价格对比
+        if record.get("sale_type") != "member":
+            VintageLabel(footer, f"（会员价: ${record['total_member_price']:.2f}）",
+                        style="small",
+                        text_color=VintageConfig.COLORS["TEXT_HINT"]).pack(side="right")
     
     def _display_stats(self, records):
         for widget in self.stats_container.winfo_children():
@@ -885,6 +958,29 @@ class SalesHistoryWindow(ctk.CTkToplevel):
         self._stat_row(overview_content, "总订单", f"{stats['total_orders']}单")
         self._stat_row(overview_content, "总书籍", f"{stats['total_books']}本")
         self._stat_row(overview_content, "总收入", f"${stats['total_revenue']:.2f}")
+        
+        # 会员/非会员统计卡片
+        if stats['member_orders'] > 0 or stats['standard_orders'] > 0:
+            type_card = ctk.CTkFrame(
+                self.stats_container,
+                fg_color=VintageConfig.COLORS["BG_CARD"],
+                corner_radius=12,
+                border_width=2,
+                border_color=VintageConfig.COLORS["BORDER"]
+            )
+            type_card.pack(fill="x", pady=(0, 10))
+            
+            type_content = ctk.CTkFrame(type_card, fg_color="transparent")
+            type_content.pack(fill="both", expand=True, padx=15, pady=12)
+            
+            VintageLabel(type_content, "🎫 购买类型", style="body_bold").pack(pady=(0, 8))
+            
+            if stats['member_orders'] > 0:
+                self._stat_row(type_content, "会员购买", 
+                              f"{stats['member_orders']}单 · ${stats['member_revenue']:.0f}")
+            if stats['standard_orders'] > 0:
+                self._stat_row(type_content, "非会员购买", 
+                              f"{stats['standard_orders']}单 · ${stats['standard_revenue']:.0f}")
         
         # 热门分类
         if stats["category_sales"]:
@@ -933,6 +1029,10 @@ class SalesHistoryWindow(ctk.CTkToplevel):
             "total_orders": len(records),
             "total_books": 0,
             "total_revenue": 0.0,
+            "member_orders": 0,
+            "standard_orders": 0,
+            "member_revenue": 0.0,
+            "standard_revenue": 0.0,
             "category_sales": defaultdict(int),
             "category_revenue": defaultdict(float),
             "manager_sales": defaultdict(int),
@@ -940,7 +1040,19 @@ class SalesHistoryWindow(ctk.CTkToplevel):
         }
         
         for record in records:
-            stats["total_revenue"] += record["total_member_price"]
+            # 统计总收入（使用实际收入）
+            actual_revenue = record.get("actual_revenue", record["total_member_price"])
+            stats["total_revenue"] += actual_revenue
+            
+            # 统计会员/非会员订单
+            sale_type = record.get("sale_type", "member")
+            if sale_type == "member":
+                stats["member_orders"] += 1
+                stats["member_revenue"] += actual_revenue
+            else:
+                stats["standard_orders"] += 1
+                stats["standard_revenue"] += actual_revenue
+            
             for book in record["books"]:
                 stats["total_books"] += 1
                 cat = book.get("category", "其他")
@@ -964,22 +1076,36 @@ class SalesHistoryWindow(ctk.CTkToplevel):
                     text_color=VintageConfig.COLORS["TEXT_MAIN"]).pack(side="right")
     
     def _on_search(self, *args):
-        keyword = self.search_var.get().lower()
-        if not keyword:
-            self._display_records(self.all_records)
-            return
-        
-        filtered = []
-        for record in self.all_records:
-            match = False
-            for book in record["books"]:
-                if keyword in book["title"].lower() or keyword in book.get("manager", "").lower():
-                    match = True
-                    break
-            if match:
-                filtered.append(record)
-        
+        query = self.search_var.get().lower()
+        filtered = self._apply_filters(query)
         self._display_records(filtered)
+        self._display_stats(filtered)
+    
+    def _on_filter_change(self, *args):
+        query = self.search_var.get().lower()
+        filtered = self._apply_filters(query)
+        self._display_records(filtered)
+        self._display_stats(filtered)
+    
+    def _apply_filters(self, query=""):
+        filtered = self.all_records
+        
+        # 购买类型筛选
+        filter_value = self.filter_var.get()
+        if filter_value == "会员购买":
+            filtered = [r for r in filtered if r.get("sale_type", "member") == "member"]
+        elif filter_value == "非会员购买":
+            filtered = [r for r in filtered if r.get("sale_type", "member") == "standard"]
+        
+        # 搜索筛选
+        if query:
+            filtered = [
+                r for r in filtered
+                if any(query in book["title"].lower() or query in book.get("manager", "").lower()
+                       for book in r["books"])
+            ]
+        
+        return filtered
     
     def _export_excel(self):
         dialog = ExportOptionsDialog(self, len(self.all_records))
@@ -1031,16 +1157,22 @@ class SalesHistoryWindow(ctk.CTkToplevel):
             
             data = []
             for record in records:
+                sale_type = record.get("sale_type", "member")
+                sale_type_text = "会员" if sale_type == "member" else "非会员"
+                
                 for book in record["books"]:
                     row = {
                         "日期": record["timestamp"].split()[0],
                         "时间": record["timestamp"].split()[1],
+                        "购买类型": sale_type_text,
                         "书名": book["title"],
                         "分类": book.get("category", ""),
                         "店长": book.get("manager", ""),
                         "原价": book["original_price"],
                         "货币": book["currency"],
-                        "售价(AUD)": book["final_price"],
+                        "会员价(AUD)": book.get("member_price", book["final_price"]),
+                        "标准价(AUD)": book.get("standard_price", book["final_price"]),
+                        "实际售价(AUD)": book["final_price"],
                         "推荐": "是" if book.get("is_recommend") else "否",
                         "二手": "是" if book.get("is_used") else "否",
                         "出租书阁": "是" if book.get("is_rental") else "否"
@@ -1280,6 +1412,41 @@ class VintageBookstoreApp(ctk.CTk):
         self.price_display = PriceDisplay(footer_content)
         self.price_display.pack(fill="x", pady=(0, 12))
         
+        # 会员/非会员选择
+        sale_type_frame = ctk.CTkFrame(footer_content, fg_color="transparent")
+        sale_type_frame.pack(fill="x", pady=(0, 12))
+        
+        VintageLabel(sale_type_frame, "购买类型：", style="label").pack(side="left", padx=(0, 10))
+        
+        self.sale_type_var = ctk.StringVar(value="")  # 默认不选择，强制用户选择
+        
+        VintageLabel(sale_type_frame, "⚠️ 必选", style="small",
+                    text_color=VintageConfig.COLORS["WARN"]).pack(side="left", padx=(0, 15))
+        
+        member_radio = ctk.CTkRadioButton(
+            sale_type_frame,
+            text="🎫 会员购买",
+            variable=self.sale_type_var,
+            value="member",
+            font=VintageConfig.FONTS["BODY"],
+            fg_color=VintageConfig.COLORS["PRIMARY"],
+            hover_color=VintageConfig.COLORS["PRIMARY_LIGHT"],
+            text_color=VintageConfig.COLORS["TEXT_MAIN"]
+        )
+        member_radio.pack(side="left", padx=(0, 20))
+        
+        standard_radio = ctk.CTkRadioButton(
+            sale_type_frame,
+            text="👥 非会员购买",
+            variable=self.sale_type_var,
+            value="standard",
+            font=VintageConfig.FONTS["BODY"],
+            fg_color=VintageConfig.COLORS["PRIMARY"],
+            hover_color=VintageConfig.COLORS["PRIMARY_LIGHT"],
+            text_color=VintageConfig.COLORS["TEXT_MAIN"]
+        )
+        standard_radio.pack(side="left")
+        
         # 未保存提示
         self.unsaved_warning = VintageLabel(
             footer_content,
@@ -1376,6 +1543,15 @@ class VintageBookstoreApp(ctk.CTk):
         if not self.rows:
             return
         
+        # 检查是否选择了购买类型
+        sale_type = self.sale_type_var.get()
+        if not sale_type:
+            self._show_message(
+                "⚠️ 请选择购买类型\n\n请在下方选择：\n🎫 会员购买 或 👥 非会员购买",
+                "提示"
+            )
+            return
+        
         # 检查是否有非AUD的新书但没有汇率
         if not self.exchange_service.has_rates():
             has_non_aud = any(
@@ -1410,12 +1586,16 @@ class VintageBookstoreApp(ctk.CTk):
         books = []
         t_mem, t_std = 0.0, 0.0
         rates = self.exchange_service.rates
+        sale_type = self.sale_type_var.get()  # 获取购买类型
         
         for card in self.rows:
             data = card.get_data()
             m, s = PricingEngine.calculate(data["price"], data["currency"], 
                                           data["is_recommend"], data["is_used"], 
                                           data["is_rental"], rates)
+            # 根据购买类型选择价格
+            final_price = m if sale_type == "member" else s
+            
             books.append({
                 "title": data["title"],
                 "category": data["category"],
@@ -1425,13 +1605,19 @@ class VintageBookstoreApp(ctk.CTk):
                 "is_recommend": data["is_recommend"],
                 "is_used": data["is_used"],
                 "is_rental": data["is_rental"],
-                "final_price": m
+                "member_price": m,
+                "standard_price": s,
+                "final_price": final_price
             })
             t_mem += m
             t_std += s
         
-        if self.data_service.save_sale(books, t_mem, t_std):
-            self._show_message(f"✓ 已保存\n{len(books)} 本书 · ${t_mem:.2f}", "成功")
+        # 计算实际收入
+        actual_revenue = t_mem if sale_type == "member" else t_std
+        
+        if self.data_service.save_sale(books, t_mem, t_std, sale_type, actual_revenue):
+            type_text = "🎫 会员购买" if sale_type == "member" else "👥 非会员购买"
+            self._show_message(f"✓ 已保存\n{type_text}\n{len(books)} 本书 · ${actual_revenue:.2f}", "成功")
             for card in self.rows[:]:
                 self._del_row(card)
     
