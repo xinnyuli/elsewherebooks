@@ -6,8 +6,8 @@
 
 import customtkinter as ctk
 import threading
-import requests
-import socket
+import requests  # 仅用于汇率更新，可离线运行
+# import socket  # 未使用，已删除
 import logging
 import signal
 import sys
@@ -217,6 +217,14 @@ class ExchangeRateService:
 
     def fetch_async(self, on_done, ctx):
         def task():
+            # ==========================================
+            # 🔒 离线模式：禁用网络请求用于 Mac 测试
+            # ==========================================
+            logger.info("[离线模式] 跳过汇率更新")
+            ctx.after(0, lambda: on_done(False, "离线模式"))
+            return
+            
+            # 以下代码已禁用 - 如需启用请删除上面的 return
             try:
                 # 直接请求API，不单独检测网络（避免防火墙阻止）
                 resp = requests.get(VintageConfig.API_URL, timeout=10)
