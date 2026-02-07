@@ -1943,5 +1943,11 @@ class VintageBookstoreApp(ctk.CTk):
 
 if __name__ == "__main__":
     RuntimeFixer.apply_patches()
-    signal.signal(signal.SIGINT, lambda s, f: sys.exit(0))
+    
+    # 信号处理（Windows/Linux 安全）
+    try:
+        signal.signal(signal.SIGINT, lambda s, f: sys.exit(0))
+    except Exception:
+        pass  # macOS 可能不支持在主线程设置信号
+    
     VintageBookstoreApp().mainloop()
