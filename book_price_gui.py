@@ -505,7 +505,7 @@ class BookCard(ctk.CTkFrame):
         
         # 特殊字符过滤和警告
         # 允许：中文、英文、数字、常见标点（《》、、。！？：；""''）、空格、连字符
-        invalid_chars = re.findall(r'[^\u4e00-\u9fa5a-zA-Z0-9\s\u3000《》\u300a\u300b、。！？：；""''\-—·()（）\[\]【】…]', title)
+        invalid_chars = re.findall(r'[^\u4e00-\u9fa5a-zA-Z0-9\s\u3000《》\u300a\u300b、。！？：；""''-—·()（）\[\]【】…]', title)
         
         # 计算字数（不含空格）
         char_count = len(re.sub(r'\s', '', clean_title))
