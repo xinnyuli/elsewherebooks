@@ -522,10 +522,6 @@ class BookCard(ctk.CTkFrame):
         title = self.title_var.get()
         clean_title = title.strip()
         
-        # 特殊字符过滤和警告
-        # 允许：中文、英文、数字、常见标点（《》、、。！？：；""''）、空格、连字符
-        invalid_chars = re.findall(r'[^\u4e00-\u9fa5a-zA-Z0-9\s\u3000《》\u300a\u300b、。！？：；""''-—·()（）\[\]【】…]', title)
-        
         # 计算字数（不含空格）
         char_count = len(re.sub(r'\s', '', clean_title))
         
@@ -537,13 +533,6 @@ class BookCard(ctk.CTkFrame):
                     text_color=VintageConfig.COLORS["WARN"]
                 )
                 self.title_entry.configure(border_color=VintageConfig.COLORS["WARN"])
-            elif invalid_chars:
-                unique_invalid = ''.join(set(invalid_chars))
-                self.char_count_label.configure(
-                    text=f"⚠️ {char_count}字 | 含特殊字符: {unique_invalid}",
-                    text_color=VintageConfig.COLORS["ERROR"]
-                )
-                self.title_entry.configure(border_color=VintageConfig.COLORS["ERROR"])
             else:
                 self.char_count_label.configure(
                     text=f"{char_count}字",
