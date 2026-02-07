@@ -9,7 +9,7 @@ import threading
 import requests  # 仅用于汇率更新，可离线运行
 # import socket  # 未使用，已删除
 import logging
-import signal
+# import signal  # macOS 主线程中可能死锁，已删除
 import sys
 import json
 import re
@@ -1952,11 +1952,5 @@ class VintageBookstoreApp(ctk.CTk):
 
 if __name__ == "__main__":
     RuntimeFixer.apply_patches()
-    
-    # 信号处理（Windows/Linux 安全）
-    try:
-        signal.signal(signal.SIGINT, lambda s, f: sys.exit(0))
-    except Exception:
-        pass  # macOS 可能不支持在主线程设置信号
-    
-    VintageBookstoreApp().mainloop()
+    app = VintageBookstoreApp()
+    app.mainloop()
