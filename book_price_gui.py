@@ -184,6 +184,15 @@ class DataService:
             managers.append(name)
             VintageConfig.MANAGERS_FILE.write_text(json.dumps(managers, ensure_ascii=False, indent=2))
     
+    def clear_all_sales(self):
+        """清除所有销售记录"""
+        try:
+            VintageConfig.SALES_FILE.write_text("[]")
+            logger.info("已清除所有销售记录")
+            return True
+        except Exception as e:
+            logger.error(f"清除记录失败: {e}")
+            return False
 
 
 class ExchangeRateService:
@@ -820,6 +829,15 @@ class SalesHistoryWindow(ctk.CTkToplevel):
             text="📥 导出Excel",
             width=120,
             command=self._export_excel
+        ).pack(side="left", padx=5)
+        
+        VintageButton(
+            search_frame,
+            text="🗑️ 清除",
+            width=80,
+            fg_color=VintageConfig.COLORS["ERROR"],
+            hover_color=VintageConfig.COLORS["WARN"],
+            command=self._clear_all_data
         ).pack(side="left")
         
         Divider(self).pack(fill="x")
@@ -1199,6 +1217,79 @@ class SalesHistoryWindow(ctk.CTkToplevel):
             self._show_message("需要安装 pandas 和 openpyxl\n\n请运行：\npip install pandas openpyxl")
         except Exception as e:
             self._show_message(f"导出失败：{str(e)}")
+    
+    def _clear_all_data(self):
+        """清除所有销售记录（需要确认）"""
+        if not self.all_records:
+            self._show_message("暂无记录需要清除")
+            return
+        
+        # 弹出确认对话框
+        result = {"confirmed": False}
+        
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("⚠️ 危险操作")
+        dialog.geometry("380x240")
+        dialog.configure(fg_color=VintageConfig.COLORS["BG_MAIN"])
+        
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - 190
+        y = (dialog.winfo_screenheight() // 2) - 120
+        dialog.geometry(f"380x240+{x}+{y}")
+        
+        dialog.transient(self)
+        dialog.grab_set()
+        
+        content = ctk.CTkFrame(dialog, fg_color="transparent")
+        content.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        VintageLabel(content, "⚠️", style="title", text_color=VintageConfig.COLORS["ERROR"]).pack(pady=(0, 10))
+        VintageLabel(content, "确认清除所有数据？", style="subtitle").pack(pady=(0, 10))
+        
+        info_frame = ctk.CTkFrame(content, fg_color=VintageConfig.COLORS["BG_CARD"],
+                                 corner_radius=10, border_width=2, border_color=VintageConfig.COLORS["ERROR"])
+        info_frame.pack(fill="x", pady=(0, 15))
+        
+        VintageLabel(info_frame, f"将删除 {len(self.all_records)} 条销售记录",
+                    style="body", text_color=VintageConfig.COLORS["ERROR"]).pack(pady=10)
+        VintageLabel(info_frame, "此操作无法撤销！",
+                    style="body_bold", text_color=VintageConfig.COLORS["WARN"]).pack(pady=(0, 10))
+        
+        btn_row = ctk.CTkFrame(content, fg_color="transparent")
+        btn_row.pack()
+        
+        def cancel():
+            result["confirmed"] = False
+            dialog.destroy()
+        
+        def confirm():
+            result["confirmed"] = True
+            dialog.destroy()
+        
+        VintageButton(btn_row, text="取消", width=120,
+                     fg_color="transparent",
+                     text_color=VintageConfig.COLORS["PRIMARY"],
+                     border_width=2,
+                     border_color=VintageConfig.COLORS["BORDER"],
+                     hover_color=VintageConfig.COLORS["BG_HOVER"],
+                     command=cancel).pack(side="left", padx=5)
+        
+        VintageButton(btn_row, text="确认清除", width=120,
+                     fg_color=VintageConfig.COLORS["ERROR"],
+                     hover_color=VintageConfig.COLORS["WARN"],
+                     command=confirm).pack(side="left", padx=5)
+        
+        self.wait_window(dialog)
+        
+        if result["confirmed"]:
+            # 执行清除
+            if self.data_service.clear_all_sales():
+                self.all_records = []
+                self._display_records([])
+                self._display_stats([])
+                self._show_message("✓ 所有记录已清除")
+            else:
+                self._show_message("清除失败，请重试")
     
     def _show_message(self, msg):
         dialog = ctk.CTkToplevel(self)
