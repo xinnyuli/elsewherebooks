@@ -1182,8 +1182,9 @@ class VintageBookstoreApp(ctk.CTk):
         left = ctk.CTkFrame(header_content, fg_color="transparent")
         left.pack(side="left")
         VintageLabel(left, VintageConfig.APP_NAME, style="title").pack(anchor="w")
-        VintageLabel(left, f"当值店长：{self.current_manager}", style="label", 
-                    text_color=VintageConfig.COLORS["TEXT_HINT"]).pack(anchor="w")
+        self.manager_label = VintageLabel(left, f"当值店长：{self.current_manager}", style="label", 
+                    text_color=VintageConfig.COLORS["TEXT_HINT"])
+        self.manager_label.pack(anchor="w")
         
         # 右侧按钮
         btn_container = ctk.CTkFrame(header_content, fg_color="transparent")
@@ -1668,14 +1669,8 @@ class VintageBookstoreApp(ctk.CTk):
                 if name not in managers:
                     self.data_service.add_manager(name)
                 self.current_manager = name
-                # 更新显示
-                for widget in self.winfo_children():
-                    if isinstance(widget, ctk.CTkFrame):
-                        for child in widget.winfo_children():
-                            if isinstance(child, ctk.CTkFrame):
-                                for label in child.winfo_children():
-                                    if isinstance(label, ctk.CTkLabel) and "当值店长" in str(label.cget("text")):
-                                        label.configure(text=f"当值店长：{name}")
+                # 更新顶部显示的店长名称
+                self.manager_label.configure(text=f"当值店长：{name}")
                 dialog.destroy()
         
         VintageButton(dialog, text="确认", width=150, command=do_switch).pack()
