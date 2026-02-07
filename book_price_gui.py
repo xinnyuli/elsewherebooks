@@ -17,17 +17,18 @@ from datetime import datetime, timedelta
 from typing import Dict, Tuple, List, Set
 from pathlib import Path
 from collections import defaultdict
+
+# ---- 基础配置 ----
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s', datefmt='%H:%M')
+logger = logging.getLogger("Bookstore")
+
 try:
     from pypinyin import lazy_pinyin
     PINYIN_AVAILABLE = True
 except ImportError:
     PINYIN_AVAILABLE = False
     logger.warning("pypinyin未安装，拼音搜索功能不可用")
-
-# ---- 基础配置 ----
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s', datefmt='%H:%M')
-logger = logging.getLogger("Bookstore")
 
 class VintageConfig:
     APP_NAME = "📚 书店记账本"
